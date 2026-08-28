@@ -1,0 +1,44 @@
+# PDF Processing
+pypdfium2>=4.20.0
+pymupdf>=1.23.0
+
+# OCR
+pytesseract>=0.3.10
+PaddleOCR>=2.7.0
+Pillow>=10.0.0
+
+# Async Database
+asyncpg>=0.28.0
+SQLAlchemy>=2.0.20
+alembic>=1.12.0
+
+# FastAPI
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Async HTTP Client for DeepSeek
+httpx>=0.25.0
+
+# Pydantic Settings
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# WebSocket
+websockets>=12.0
+
+# Prometheus Metrics
+prometheus-client>=0.19.0
+
+# Logging
+aiofiles>=23.0.0
+
+# Concurrency
+concurrent-log-handler>=0.9.25
+
+# Windows Service
+pywin32>=306
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic-extra-types>=2.2.0
