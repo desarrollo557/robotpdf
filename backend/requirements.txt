@@ -9,6 +9,7 @@ Pillow>=10.0.0
 
 # Async Database
 asyncpg>=0.28.0
+aiomysql>=0.3.2
 SQLAlchemy>=2.0.20
 alembic>=1.12.0
 

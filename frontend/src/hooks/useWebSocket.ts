@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { wsApi } from '../api/client'
+import { wsApi, API_BASE_URL } from '../api/client'
 
 export interface ProgressData {
   job_id: number
@@ -294,7 +294,7 @@ export function useJobStatus(
     const fetchJobStatus = async () => {
       try {
         setIsLoading(true)
-        const response = await fetch(`${wsApi.getJobWsUrl(0).replace('ws://', 'http://')}/api/jobs/${jobId}/status`)
+        const response = await fetch(`${API_BASE_URL}/api/jobs/${jobId}/status`)
         const data = await response.json()
         setJobStatus(data)
       } catch (err) {

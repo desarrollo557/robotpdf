@@ -147,7 +147,9 @@ async def upload_pdf(
         )
         
         # Submit job to pipeline
-        background_tasks.add_task(orchestrator.submit_job, job)
+        # Use asyncio.create_task instead of background_tasks to maintain async context
+        import asyncio
+        asyncio.create_task(orchestrator.submit_job(job))
         
         return {
             "id": job.id,

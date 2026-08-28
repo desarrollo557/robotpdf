@@ -399,17 +399,34 @@ class HybridOCREngine(OCREngine):
                 return tesseract_text, tesseract_confidence, total_time, "tesseract"
             
             # Confidence is low, try PaddleOCR if available
-            if self._paddleocr is not None:
+            paddle_ready = (
+                self._paddleocr is not None
+                and getattr(self._paddleocr, "_ocr", None) is not None
+            )
+            if paddle_ready:
                 logger.debug(
                     f"Tesseract confidence {tesseract_confidence:.3f} < "
                     f"threshold {self._confidence_threshold:.3f} | Falling back to PaddleOCR"
                 )
                 
-                paddle_text, paddle_confidence, paddle_time = await self._paddleocr.extract_text(image)
-                total_time = time.time() - start_time
-                
-                # Always use PaddleOCR result when Tesseract confidence is low
-                return paddle_text, paddle_confidence, total_time, "paddleocr"
+                try:
+                    paddle_text, paddle_confidence, paddle_time = await self._paddleocr.extract_text(image)
+                    total_time = time.time() - start_time
+                    # Always use PaddleOCR result when Tesseract confidence is low
+                    return paddle_text, paddle_confidence, total_time, "paddleocr"
+                except Exception as paddle_err:
+                    logger.warning(
+                        f"PaddleOCR fallback failed ({paddle_err}); "
+                        f"keeping Tesseract result"
+                    )
+                    return tesseract_text, tesseract_confidence, total_time, "tesseract"
+            else:
+                logger.warning(
+                    f"Tesseract confidence {tesseract_confidence:.3f} < "
+                    f"threshold {self._confidence_threshold:.3f} | "
+                    f"PaddleOCR unavailable | Using Tesseract anyway"
+                )
+                return tesseract_text, tesseract_confidence, total_time, "tesseract"
             
             # No fallback available, return Tesseract result anyway
             logger.warning(

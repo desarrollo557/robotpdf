@@ -346,7 +346,7 @@ function StatsPanel({ jobId, onClose }: StatsPanelProps) {
             <div className="flex items-center justify-between mb-4">
               <h3 className="font-semibold text-gray-700">Tiempo Estimado Restante</h3>
               <span className="badge badge-info">
-                {calculateETA(progressData!)}
+                {progressData ? calculateETA(progressData) : 'Calculando...'}
               </span>
             </div>
             <div className="space-y-4">
@@ -355,8 +355,8 @@ function StatsPanel({ jobId, onClose }: StatsPanelProps) {
                 <span className="font-medium">
                   {formatNumber(
                     (progressData?.total_pages || 0) - 
-                    ((progressData?.stage2.completed || 0) + 
-                     (progressData?.stage3.completed || 0))
+                    ((progressData?.stage2?.completed || 0) + 
+                     (progressData?.stage3?.completed || 0))
                   )}
                 </span>
               </div>

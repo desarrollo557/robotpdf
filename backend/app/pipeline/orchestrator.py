@@ -18,6 +18,8 @@ from ..core.metrics import (
     STAGE1_QUEUE_SIZE, STAGE2_QUEUE_SIZE, STAGE3_QUEUE_SIZE,
     ACTIVE_WORKERS, PAGES_PER_MINUTE
 )
+from sqlalchemy.orm import selectinload
+
 from ..db.models import Job, Page, JobStatus, PageStatus, ResolutionGroup
 from ..db.base import AsyncSessionLocal
 from ..render.pdf_renderer import renderer
@@ -208,6 +210,7 @@ class PipelineOrchestrator:
         
         # Progress tracking
         self._progress: Dict[int, JobProgress] = {}
+        self._stage3_enqueued: set = set()
         self._running = False
         self._shutdown = False
         
@@ -278,43 +281,54 @@ class PipelineOrchestrator:
             return False
         
         try:
-            # Initialize progress tracking
-            progress = JobProgress(
-                job_id=job.id,
-                total_pages=job.total_pages
-            )
-            self._progress[job.id] = progress
-            
-            # Submit all pages to Stage 1
-            for page in job.pages:
-                task = Stage1Task(
-                    job_id=job.id,
-                    page_id=page.id,
-                    page_number=page.page_number,
-                    pdf_path=Path(job.file_path),
-                    temp_dir=settings.TEMP_DIR
-                )
-                
-                # Wait if queue is full (backpressure)
-                await self._stage1_queue.put(task)
-                progress.stage1_pending += 1
-            
-            # Update job status
+            # Reload job with pages to avoid detached instance error
             async with AsyncSessionLocal() as session:
-                job.status = JobStatus.PROCESSING
-                job.started_at = datetime.utcnow()
+                result = await session.get(
+                    Job, job.id, options=[selectinload(Job.pages)]
+                )
+                if not result:
+                    logger.error(f"Job {job.id} not found in database")
+                    return False
+
+                # Initialize progress tracking
+                progress = JobProgress(
+                    job_id=result.id,
+                    total_pages=result.total_pages
+                )
+                self._progress[result.id] = progress
+                self._stage3_enqueued.discard(result.id)
+
+                # Submit all pages to Stage 1
+                for page in result.pages:
+                    task = Stage1Task(
+                        job_id=result.id,
+                        page_id=page.id,
+                        page_number=page.page_number,
+                        pdf_path=Path(result.file_path),
+                        temp_dir=settings.TEMP_DIR
+                    )
+
+                    # Wait if queue is full (backpressure)
+                    await self._stage1_queue.put(task)
+                    progress.stage1_pending += 1
+
+                # Update job status
+                result.status = JobStatus.PROCESSING
+                result.started_at = datetime.utcnow()
                 await session.commit()
-            
+
             logger.info(
                 f"Job {job.id} submitted | "
                 f"File={job.filename} | "
                 f"Pages={job.total_pages}"
             )
-            
+
             return True
             
         except Exception as e:
             logger.error(f"Error submitting job {job.id}: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return False
     
     async def _stage1_worker(self, worker_id: int):
@@ -485,27 +499,29 @@ class PipelineOrchestrator:
                 async with self._stage2_semaphore:
                     result = await self._process_stage2(task)
                 
-                if result and result.get('resolution_code'):
-                    # Update progress
+                if result is not None:
+                    # Update progress (empty code is valid: page completed, just no resolution)
                     if progress:
-                        code = result['resolution_code']
-                        if code not in progress.resolution_groups:
+                        code = result.get('resolution_code') or ""
+                        if code and code not in progress.resolution_groups:
                             progress.resolution_groups[code] = []
-                        progress.resolution_groups[code].append(task.page_number)
+                        if code:
+                            progress.resolution_groups[code].append(task.page_number)
                         
                         progress.stage2_completed += 1
                         progress.stage2_processing -= 1
                         if result.get('ai_time'):
                             progress.ai_times.append(result['ai_time'])
-                        
-                        # Check if all pages in job have resolution codes
-                        if progress.stage2_completed + progress.stage2_failed >= progress.total_pages:
-                            # Submit to Stage 3
-                            await self._stage3_queue.put(task.job_id)
                 else:
                     if progress:
                         progress.stage2_failed += 1
                         progress.stage2_processing -= 1
+                
+                # Trigger Stage 3 once all pages have a result (completed or failed)
+                if progress and progress.stage2_completed + progress.stage2_failed >= progress.total_pages:
+                    if task.job_id not in self._stage3_enqueued:
+                        self._stage3_enqueued.add(task.job_id)
+                        await self._stage3_queue.put(task.job_id)
                 
                 self._stage2_queue.task_done()
                 
@@ -708,6 +724,13 @@ class PipelineOrchestrator:
                     job.processed_pages = sum(len(pages) for pages in groups.values())
                     job.failed_pages = len([p for p in pages if p.status == PageStatus.FAILED])
                     await session.commit()
+            
+            # Notify connected clients that the job is complete
+            try:
+                from ..websocket.handler import ws_manager
+                await ws_manager.notify_job_complete(job_id)
+            except Exception as ws_err:
+                logger.warning(f"Failed to notify job complete via WebSocket: {ws_err}")
             
             # Update progress
             if progress:
